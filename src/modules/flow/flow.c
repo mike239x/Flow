@@ -345,6 +345,40 @@ static inline uint32_t compute_sad_8x8(uint8_t *image1, uint8_t *image2, uint16_
 	return acc;
 }
 
+inline int16_t min ( int16_t a, int16_t b ) { return (a < b) ? a : b; }
+inline int16_t max ( int16_t a, int16_t b ) { return (a < b) ? b : a; }
+
+// prototype:
+float histogram_peak(uint16_t* hist, uint16_t hist_size);
+
+float histogram_peak(uint16_t* hist, uint16_t hist_size)
+{
+    int16_t  maxposition = 0;
+    uint16_t maxvalue    = 0;
+
+    /* position of maximal histogram peek */
+    for (uint16_t j = 0; j < hist_size; j++)
+    {
+        if (hist[j] > maxvalue)
+        {
+            maxvalue    = hist[j];
+            maxposition = j;
+        }
+    }
+
+    /* after finding maximum compute average using nearby bins */
+    float acc_value = 0.0f;
+    float weight    = 0.0f;
+
+    for (uint8_t h = max( maxposition, 2) - 2; h <= min( maxposition, hist_size - 3 ) + 2; h++)
+    {
+        acc_value += (float) (h * hist[h]);
+        weight    += (float) hist[h];
+    }
+
+    return (weight > 0) ? acc_value / weight : 0.0f;
+}
+
 /**
  * @brief Computes pixel flow from image1 to image2
  *
@@ -360,7 +394,6 @@ static inline uint32_t compute_sad_8x8(uint8_t *image1, uint8_t *image2, uint16_
  * @return        quality of flow calculation
  */
 uint8_t compute_flow(uint8_t *image1, uint8_t *image2, float x_rate, float y_rate, float z_rate, float *pixel_flow_x, float *pixel_flow_y) {
-
 	/* constants */
 	const int16_t winmin = -SEARCH_SIZE;
 	const int16_t winmax = SEARCH_SIZE;
@@ -480,219 +513,111 @@ uint8_t compute_flow(uint8_t *image1, uint8_t *image2, float x_rate, float y_rat
 			}
 		}
 	}
-
 	/* evaluate flow calculation */
 	if (meancount > 10)
 	{
 		meanflowx /= meancount;
 		meanflowy /= meancount;
 
-		int16_t maxpositionx = 0;
-		int16_t maxpositiony = 0;
-		uint16_t maxvaluex = 0;
-		uint16_t maxvaluey = 0;
+        if (FLOAT_AS_BOOL(global_data.param[PARAM_BOTTOM_FLOW_HIST_FILTER]))
+        {
+            histflowx = (histogram_peak(histx, hist_size) - (winmax-winmin+1)) / 2.0f ;
+            histflowy = (histogram_peak(histy, hist_size) - (winmax-winmin+1)) / 2.0f ;
+        }
+        else
+        {
 
-		/* position of maximal histogram peek */
-		for (j = 0; j < hist_size; j++)
-		{
-			if (histx[j] > maxvaluex)
-			{
-				maxvaluex = histx[j];
-				maxpositionx = j;
-			}
-			if (histy[j] > maxvaluey)
-			{
-				maxvaluey = histy[j];
-				maxpositiony = j;
-			}
-		}
+            /* use average of accepted flow values */
+            uint32_t meancount_x = 0;
+            uint32_t meancount_y = 0;
 
-		/* check if there is a peak value in histogram */
-		if (1) //(histx[maxpositionx] > meancount / 6 && histy[maxpositiony] > meancount / 6)
-		{
-			if (FLOAT_AS_BOOL(global_data.param[PARAM_BOTTOM_FLOW_HIST_FILTER]))
-			{
+            for (uint8_t h = 0; h < meancount; h++)
+            {
+                float subdirx = 0.0f;
+                if (subdirs[h] == 0 || subdirs[h] == 1 || subdirs[h] == 7) subdirx = 0.5f;
+                if (subdirs[h] == 3 || subdirs[h] == 4 || subdirs[h] == 5) subdirx = -0.5f;
+                histflowx += (float)dirsx[h] + subdirx;
+                meancount_x++;
 
-				/* use histogram filter peek value */
-				uint16_t hist_x_min = maxpositionx;
-				uint16_t hist_x_max = maxpositionx;
-				uint16_t hist_y_min = maxpositiony;
-				uint16_t hist_y_max = maxpositiony;
+                float subdiry = 0.0f;
+                if (subdirs[h] == 5 || subdirs[h] == 6 || subdirs[h] == 7) subdiry = -0.5f;
+                if (subdirs[h] == 1 || subdirs[h] == 2 || subdirs[h] == 3) subdiry = 0.5f;
+                histflowy += (float)dirsy[h] + subdiry;
+                meancount_y++;
+            }
 
-				/* x direction */
-				if (maxpositionx > 1 && maxpositionx < hist_size-2)
-				{
-					hist_x_min = maxpositionx - 2;
-					hist_x_max = maxpositionx + 2;
-				}
-				else if (maxpositionx == 0)
-				{
-					hist_x_min = maxpositionx;
-					hist_x_max = maxpositionx + 2;
-				}
-				else  if (maxpositionx == hist_size-1)
-				{
-					hist_x_min = maxpositionx - 2;
-					hist_x_max = maxpositionx;
-				}
-				else if (maxpositionx == 1)
-				{
-					hist_x_min = maxpositionx - 1;
-					hist_x_max = maxpositionx + 2;
-				}
-				else  if (maxpositionx == hist_size-2)
-				{
-					hist_x_min = maxpositionx - 2;
-					hist_x_max = maxpositionx + 1;
-				}
+            histflowx /= meancount_x;
+            histflowy /= meancount_y;
 
-				/* y direction */
-				if (maxpositiony > 1 && maxpositiony < hist_size-2)
-				{
-					hist_y_min = maxpositiony - 2;
-					hist_y_max = maxpositiony + 2;
-				}
-				else if (maxpositiony == 0)
-				{
-					hist_y_min = maxpositiony;
-					hist_y_max = maxpositiony + 2;
-				}
-				else if (maxpositiony == hist_size-1)
-				{
-					hist_y_min = maxpositiony - 2;
-					hist_y_max = maxpositiony;
-				}
-				else if (maxpositiony == 1)
-				{
-					hist_y_min = maxpositiony - 1;
-					hist_y_max = maxpositiony + 2;
-				}
-				else if (maxpositiony == hist_size-2)
-				{
-					hist_y_min = maxpositiony - 2;
-					hist_y_max = maxpositiony + 1;
-				}
+        }
 
-				float hist_x_value = 0.0f;
-				float hist_x_weight = 0.0f;
+        /* compensate rotation */
+        /* calculate focal length in pixels */
+        const float focal_length_px = (global_data.param[PARAM_FOCAL_LENGTH_MM]) / (4.0f * 6.0f) * 1000.0f; //original focal lenght: 12mm pixelsize: 6um, binning 4 enabled
 
-				float hist_y_value = 0.0f;
-				float hist_y_weight = 0.0f;
+        /*
+         * gyro compensation
+         * the compensated value is clamped to
+         * the maximum measurable flow value (PARAM_MAX_FLOW_PIXEL) +0.5
+         * (sub pixel flow can add half pixel to the value)
+         *
+         * -y_rate gives x flow
+         * x_rates gives y_flow
+         */
+        if (FLOAT_AS_BOOL(global_data.param[PARAM_BOTTOM_FLOW_GYRO_COMPENSATION]))
+        {
+            if(fabsf(y_rate) > global_data.param[PARAM_GYRO_COMPENSATION_THRESHOLD])
+            {
+                /* calc pixel of gyro */
+                float y_rate_pixel = y_rate * (get_time_between_images() / 1000000.0f) * focal_length_px;
+                float comp_x = histflowx + y_rate_pixel;
 
-				for (uint8_t h = hist_x_min; h < hist_x_max+1; h++)
-				{
-					hist_x_value += (float) (h*histx[h]);
-					hist_x_weight += (float) histx[h];
-				}
+                /* clamp value to maximum search window size plus half pixel from subpixel search */
+                if (comp_x < (-SEARCH_SIZE - 0.5f))
+                    *pixel_flow_x = (-SEARCH_SIZE - 0.5f);
+                else if (comp_x > (SEARCH_SIZE + 0.5f))
+                    *pixel_flow_x = (SEARCH_SIZE + 0.5f);
+                else
+                    *pixel_flow_x = comp_x;
+            }
+            else
+            {
+                *pixel_flow_x = histflowx;
+            }
 
-				for (uint8_t h = hist_y_min; h<hist_y_max+1; h++)
-				{
-					hist_y_value += (float) (h*histy[h]);
-					hist_y_weight += (float) histy[h];
-				}
+            if(fabsf(x_rate) > global_data.param[PARAM_GYRO_COMPENSATION_THRESHOLD])
+            {
+                /* calc pixel of gyro */
+                float x_rate_pixel = x_rate * (get_time_between_images() / 1000000.0f) * focal_length_px;
+                float comp_y = histflowy - x_rate_pixel;
 
-				histflowx = (hist_x_value/hist_x_weight - (winmax-winmin+1)) / 2.0f ;
-				histflowy = (hist_y_value/hist_y_weight - (winmax-winmin+1)) / 2.0f;
+                /* clamp value to maximum search window size plus/minus half pixel from subpixel search */
+                if (comp_y < (-SEARCH_SIZE - 0.5f))
+                    *pixel_flow_y = (-SEARCH_SIZE - 0.5f);
+                else if (comp_y > (SEARCH_SIZE + 0.5f))
+                    *pixel_flow_y = (SEARCH_SIZE + 0.5f);
+                else
+                    *pixel_flow_y = comp_y;
+            }
+            else
+            {
+                *pixel_flow_y = histflowy;
+            }
 
-			}
-			else
-			{
-
-				/* use average of accepted flow values */
-
-				for (uint8_t h = 0; h < meancount; h++)
-				{
-					float subdirx = 0.0f;
-					if (subdirs[h] == 0 || subdirs[h] == 1 || subdirs[h] == 7) subdirx = 0.5f;
-					if (subdirs[h] == 3 || subdirs[h] == 4 || subdirs[h] == 5) subdirx = -0.5f;
-					histflowx += (float)dirsx[h] + subdirx;
-
-					float subdiry = 0.0f;
-					if (subdirs[h] == 5 || subdirs[h] == 6 || subdirs[h] == 7) subdiry = -0.5f;
-					if (subdirs[h] == 1 || subdirs[h] == 2 || subdirs[h] == 3) subdiry = 0.5f;
-					histflowy += (float)dirsy[h] + subdiry;
-				}
-
-				histflowx /= meancount;
-				histflowy /= meancount;
-
-			}
-
-			/* compensate rotation */
-			/* calculate focal length in pixels */
-			const float focal_length_px = (global_data.param[PARAM_FOCAL_LENGTH_MM]) / (4.0f * 6.0f) * 1000.0f; //original focal lenght: 12mm pixelsize: 6um, binning 4 enabled
-
-			/*
-			 * gyro compensation
-			 * the compensated value is clamped to
-			 * the maximum measurable flow value of SEARCH_SIZE + 0.5
-			 * (sub pixel flow can add half pixel to the value)
-			 *
-			 * -y_rate gives x flow
-			 * x_rates gives y_flow
-			 */
-			if (FLOAT_AS_BOOL(global_data.param[PARAM_BOTTOM_FLOW_GYRO_COMPENSATION]))
-			{
-				if(fabsf(y_rate) > global_data.param[PARAM_GYRO_COMPENSATION_THRESHOLD])
-				{
-					/* calc pixel of gyro */
-					float y_rate_pixel = y_rate * (get_time_between_images() / 1000000.0f) * focal_length_px;
-					float comp_x = histflowx + y_rate_pixel;
-
-                    /* clamp value to maximum search window size plus half pixel from subpixel search */
-                    if (comp_x < (-SEARCH_SIZE - 0.5f))
-                    	*pixel_flow_x = (-SEARCH_SIZE - 0.5f);
-                    else if (comp_x > (SEARCH_SIZE + 0.5f))
-                    	*pixel_flow_x = (SEARCH_SIZE + 0.5f);
-                    else
-                    	*pixel_flow_x = comp_x;
-				}
-				else
-				{
-					*pixel_flow_x = histflowx;
-				}
-
-				if(fabsf(x_rate) > global_data.param[PARAM_GYRO_COMPENSATION_THRESHOLD])
-				{
-					/* calc pixel of gyro */
-					float x_rate_pixel = x_rate * (get_time_between_images() / 1000000.0f) * focal_length_px;
-					float comp_y = histflowy - x_rate_pixel;
-
-					/* clamp value to maximum search window size plus/minus half pixel from subpixel search */
-					if (comp_y < (-SEARCH_SIZE - 0.5f))
-						*pixel_flow_y = (-SEARCH_SIZE - 0.5f);
-					else if (comp_y > (SEARCH_SIZE + 0.5f))
-						*pixel_flow_y = (SEARCH_SIZE + 0.5f);
-					else
-						*pixel_flow_y = comp_y;
-				}
-				else
-				{
-					*pixel_flow_y = histflowy;
-				}
-
-//				/* alternative compensation */
-//				/* compensate y rotation */
-//				*pixel_flow_x = histflowx + y_rate_pixel;
+//			/* alternative compensation */
+//			/* compensate y rotation */
+//			*pixel_flow_x = histflowx + y_rate_pixel;
 //
-//				/* compensate x rotation */
-//				*pixel_flow_y = histflowy - x_rate_pixel;
+//			/* compensate x rotation */
+//			*pixel_flow_y = histflowy - x_rate_pixel;
 
-			}
-			else
-			{
-				/* without gyro compensation */
-				*pixel_flow_x = histflowx;
-				*pixel_flow_y = histflowy;
-			}
-
-		}
-		else
-		{
-			*pixel_flow_x = 0.0f;
-			*pixel_flow_y = 0.0f;
-			return 0;
-		}
+        }
+        else
+        {
+            /* without gyro compensation */
+            *pixel_flow_x = histflowx;
+            *pixel_flow_y = histflowy;
+        }
 	}
 	else
 	{
@@ -703,6 +628,5 @@ uint8_t compute_flow(uint8_t *image1, uint8_t *image2, float x_rate, float y_rat
 
 	/* calculate quality */
 	uint8_t qual = (uint8_t)(meancount * 255 / (NUM_BLOCKS*NUM_BLOCKS));
-
 	return qual;
 }
