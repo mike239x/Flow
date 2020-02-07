@@ -233,6 +233,25 @@ void buffer_reset(void) {
 	buffer_reset_needed = 1;
 }
 
+/* code for timing code execution */
+uint32_t timing_start = 0;
+uint32_t timing_acc = 0;
+uint32_t timing_count = 0;
+void tic (void) {
+	timing_start = get_boot_time_us();
+}
+void toc (void) {
+	timing_acc += get_boot_time_us() - timing_start;
+	timing_count ++;
+}
+uint32_t avg_timing() {
+	return (timing_count ? (timing_acc / timing_count) : 0);
+}
+void reset_timing() {
+	timing_acc = 0;
+	timing_count = 0;
+}
+
 /**
   * @brief  Main function.
   */
@@ -619,6 +638,14 @@ int main(void)
 				{
 					mavlink_msg_debug_vect_send(MAVLINK_COMM_2, "GYRO", get_boot_time_us(), x_rate, y_rate, z_rate);
 				}
+
+				/* if (false) */
+				{
+					mavlink_msg_named_value_int_send(MAVLINK_COMM_2, get_boot_time_us(), "AVG_TIME", avg_timing());
+					mavlink_msg_named_value_int_send(MAVLINK_COMM_2, get_boot_time_us(), "TIMING_CNT", timing_count);
+				}
+
+				reset_timing();
 
 				integration_timespan = 0;
 				accumulated_flow_x = 0;
